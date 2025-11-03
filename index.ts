@@ -437,39 +437,183 @@ export async function heavyQuery() {
 }
 
 // ============================================
+// STATISTICS CALCULATOR
+// ============================================
+interface Stats {
+  avg: number;
+  min: number;
+  max: number;
+  sd: number;
+}
+
+function calculateStats(values: number[]): Stats {
+  const n = values.length;
+  const avg = values.reduce((a, b) => a + b, 0) / n;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+
+  // Standard deviation
+  const variance =
+    values.reduce((sum, val) => sum + Math.pow(val - avg, 2), 0) / n;
+  const sd = Math.sqrt(variance);
+
+  return { avg, min, max, sd };
+}
+
+function formatDuration(ms: number): string {
+  if (ms >= 1000) {
+    return `${(ms / 1000).toFixed(2)}s`;
+  }
+  return `${ms.toFixed(0)}ms`;
+}
+
+function printTable(title: string, data: { [key: string]: Stats }) {
+  console.log("\n" + title);
+  console.log(
+    "┌─────────────────┬──────────────┬──────────────┬──────────────┬──────────────┐"
+  );
+  console.log(
+    "│ Query Type      │ Average      │ Min          │ Max          │ Std Dev      │"
+  );
+  console.log(
+    "├─────────────────┼──────────────┼──────────────┼──────────────┼──────────────┤"
+  );
+
+  Object.entries(data).forEach(([key, stats]) => {
+    const name = key.padEnd(15);
+    const avg = formatDuration(stats.avg).padEnd(12);
+    const min = formatDuration(stats.min).padEnd(12);
+    const max = formatDuration(stats.max).padEnd(12);
+    const sd = formatDuration(stats.sd).padEnd(12);
+    console.log(`│ ${name} │ ${avg} │ ${min} │ ${max} │ ${sd} │`);
+  });
+
+  console.log(
+    "└─────────────────┴──────────────┴──────────────┴──────────────┴──────────────┘"
+  );
+}
+
+// ============================================
 // MAIN BENCHMARK RUNNER
 // ============================================
 export async function runBenchmark() {
-  console.log("🚀 Starting Database Performance Benchmark\n");
+  console.log("🚀 Starting Database Performance Benchmark (10 iterations)\n");
+
+  const iterations = 10;
+  const results = {
+    lightweight: [] as number[],
+    medium: [] as number[],
+    heavy: [] as number[],
+    total: [] as number[],
+  };
 
   try {
-    // Test 1: Lightweight
-    const lightResult = await lightweightQuery();
-    console.log("\n" + "=".repeat(50) + "\n");
+    for (let i = 1; i <= iterations; i++) {
+      console.log(`\n${"=".repeat(70)}`);
+      console.log(`🔄 ITERATION ${i}/${iterations}`);
+      console.log("=".repeat(70) + "\n");
 
-    // Test 2: Medium
-    const mediumResult = await mediumQuery();
-    console.log("\n" + "=".repeat(50) + "\n");
+      const iterationStart = Date.now();
 
-    // Test 3: Heavy
-    const heavyResult = await heavyQuery();
-    console.log("\n" + "=".repeat(50) + "\n");
+      // Test 1: Lightweight
+      const lightResult = await lightweightQuery();
+      results.lightweight.push(lightResult.duration);
+      console.log("\n" + "-".repeat(70) + "\n");
 
-    // Summary
-    console.log("📊 BENCHMARK SUMMARY:");
-    console.log(`   Lightweight Query: ${lightResult.duration}ms`);
-    console.log(`   Medium Query: ${mediumResult.duration}ms`);
-    console.log(`   Heavy Query: ${heavyResult.duration}ms`);
+      // Test 2: Medium
+      const mediumResult = await mediumQuery();
+      results.medium.push(mediumResult.duration);
+      console.log("\n" + "-".repeat(70) + "\n");
+
+      // Test 3: Heavy
+      const heavyResult = await heavyQuery();
+      results.heavy.push(heavyResult.duration);
+
+      const iterationEnd = Date.now();
+      const totalTime = iterationEnd - iterationStart;
+      results.total.push(totalTime);
+
+      console.log("\n" + "-".repeat(70));
+      console.log(
+        `✅ Iteration ${i} completed in ${formatDuration(totalTime)}`
+      );
+      console.log(
+        `   Light: ${formatDuration(
+          lightResult.duration
+        )} | Medium: ${formatDuration(
+          mediumResult.duration
+        )} | Heavy: ${formatDuration(heavyResult.duration)}`
+      );
+      console.log("-".repeat(70));
+
+      // Add a small delay between iterations to let the system breathe
+      if (i < iterations) {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+    }
+
+    // Calculate statistics
+    console.log("\n\n" + "=".repeat(70));
+    console.log("📊 FINAL BENCHMARK STATISTICS (10 iterations)");
+    console.log("=".repeat(70));
+
+    const stats = {
+      Lightweight: calculateStats(results.lightweight),
+      Medium: calculateStats(results.medium),
+      Heavy: calculateStats(results.heavy),
+      Total: calculateStats(results.total),
+    };
+
+    printTable("Performance Statistics", stats);
+
+    // Additional insights
+    console.log("\n📈 INSIGHTS:");
     console.log(
-      `   Total Time: ${
-        lightResult.duration + mediumResult.duration + heavyResult.duration
-      }ms`
+      `   • Lightweight queries are ${(
+        stats.Heavy.avg / stats.Lightweight.avg
+      ).toFixed(1)}x faster than Heavy queries`
+    );
+    console.log(
+      `   • Heavy query variability (CV): ${(
+        (stats.Heavy.sd / stats.Heavy.avg) *
+        100
+      ).toFixed(1)}%`
+    );
+    const mostConsistentKey = (() => {
+      const filtered = Object.entries(stats).filter(([key]) => key !== "Total");
+      if (filtered.length === 0) return "N/A";
+      const [key] = filtered.reduce((min, cur) => {
+        const [, minVal] = min;
+        const [, curVal] = cur;
+        return curVal.sd / curVal.avg < minVal.sd / minVal.avg ? cur : min;
+      }, filtered[0]);
+      return key;
+    })();
+
+    console.log(`   • Most consistent query: ${mostConsistentKey}`);
+
+    // Raw data for export
+    console.log("\n📋 RAW DATA (for external analysis):");
+    console.log(
+      "Lightweight:",
+      results.lightweight.map((v) => v.toFixed(0)).join(", ")
+    );
+    console.log(
+      "Medium:     ",
+      results.medium.map((v) => v.toFixed(0)).join(", ")
+    );
+    console.log(
+      "Heavy:      ",
+      results.heavy.map((v) => v.toFixed(0)).join(", ")
+    );
+    console.log(
+      "Total:      ",
+      results.total.map((v) => v.toFixed(0)).join(", ")
     );
 
     return {
-      lightweight: lightResult,
-      medium: mediumResult,
-      heavy: heavyResult,
+      results,
+      stats,
     };
   } catch (error) {
     console.error("❌ Benchmark failed:", error);
